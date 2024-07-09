@@ -2,8 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\ApiToken;
-
 class TokenManagerService
 {
     function encrypt($data): string

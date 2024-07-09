@@ -47,13 +47,12 @@ class User extends Authenticatable
         ];
     }
 
-    public function createToken(): bool
+    public function createToken(TokenManagerService $tokenManagerService): bool
     {
-        $token_manager_service = new TokenManagerService();
         $str = Str::random(60);
         ApiToken::create([
             'user_id' => $this->id,
-            'encrypted_api_key' => $token_manager_service->encrypt($str)
+            'encrypted_api_key' => $tokenManagerService->encrypt($str)
         ]);
         return true;
     }

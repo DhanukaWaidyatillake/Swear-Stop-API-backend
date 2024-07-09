@@ -10,6 +10,13 @@ use Symfony\Component\HttpFoundation\Response;
 
 class TokenVerificationMiddleware
 {
+    protected TokenManagerService $tokenManagerService;
+
+    public function __construct(TokenManagerService $tokenManagerService)
+    {
+        $this->tokenManagerService = $tokenManagerService;
+    }
+
     /**
      * Handle an incoming request.
      *
@@ -17,8 +24,7 @@ class TokenVerificationMiddleware
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $token_manager_service=new TokenManagerService();
-        $encrypted_token=$token_manager_service->encrypt($request->bearerToken());
+        $encrypted_token=$this->tokenManagerService->encrypt($request->bearerToken());
         $api_token=ApiToken::query()->where('encrypted_api_key',$encrypted_token)->first();
         if($api_token) {
             $request->setUserResolver(function () use ($api_token) {

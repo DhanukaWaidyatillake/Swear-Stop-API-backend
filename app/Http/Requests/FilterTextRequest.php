@@ -2,18 +2,16 @@
 
 namespace App\Http\Requests;
 
-use App\Models\SiteConfig;
 use Illuminate\Foundation\Http\FormRequest;
 
-class GenerateTokenRequest extends FormRequest
+class FilterTextRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
      */
     public function authorize(): bool
     {
-        //Checking is signup token is valid
-        return ($this->request->has('signup_secret') && SiteConfig::query()->firstWhere('key', 'signup_secret')?->value == $this->request->get('signup_secret'));
+        return true;
     }
 
     /**
@@ -24,8 +22,7 @@ class GenerateTokenRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'user_id' => 'required|exists:users,id',
-            'signup_secret' => 'required'
+            //
         ];
     }
 }
