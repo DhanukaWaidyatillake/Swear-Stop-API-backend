@@ -3,13 +3,14 @@
 namespace App\Services;
 
 use App\Models\BlacklistedWord;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 
 class TextFilterService
 {
     public function filterText($user_id, $text): array
     {
-        $black_listed_words = BlacklistedWord::query()->where('user_id', $user_id)->get()->pluck('word')->toArray();
+        $black_listed_words = BlacklistedWord::query()->where('user_id', $user_id)->where('is_enabled',true)->get()->pluck('word')->toArray();
 
         $sentence = $text;
         $words = explode(" ", $sentence);
@@ -88,10 +89,10 @@ class TextFilterService
         }
 
         //Checking for banned words after refining sentence
-        $banned_words_in_sentence[] = $this->checkingForBannedWordsInGivenSentence($black_listed_words, $delimiter, $sentence, $words);
+        $banned_words_in_sentence[] = $this->checkingForBannedWordsInGivenSentence($black_listed_words, $delimiter, $refined_sentence, $words_of_refined_sentence);
 
         //removing duplicate occurrences from banned_words_in_sentence array
-        return array_values(array_unique($banned_words_in_sentence));
+        return array_unique(Arr::flatten($banned_words_in_sentence));
     }
 
     public function maskText($string, $banned_words): string
@@ -113,13 +114,14 @@ class TextFilterService
     private function checkingForBannedWordsInGivenSentence(array $black_listed_words, $delimiter, mixed $sentence, array $words): array
     {
         $banned_words_in_given_sentence=[];
-
         foreach ($black_listed_words as $banned_word) {
             $banned_word = strtolower($banned_word);
-            if (preg_match($delimiter . "$banned_word" . $delimiter, $sentence)) {
+            $pattern = $delimiter . preg_quote($banned_word, $delimiter) . $delimiter . 'i';
+
+            if (preg_match($pattern, $sentence)) {
                 $indexes = [];
                 foreach ($words as $key => $item) {
-                    if (str_contains($item, $banned_word)) {
+                    if (str_contains(strtolower($item), $banned_word)) {
                         $indexes[] = $key;
                     }
                 }
@@ -135,6 +137,7 @@ class TextFilterService
                 }
             }
         }
+
         return $banned_words_in_given_sentence;
     }
 }

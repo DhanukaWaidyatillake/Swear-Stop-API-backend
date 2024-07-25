@@ -15,7 +15,8 @@ Route::middleware([\App\Http\Middleware\TokenVerificationMiddleware::class])->gr
     Route::post('/refresh-token', [\App\Http\Controllers\TokenManagerController::class, 'refreshToken']);
 
     Route::prefix('v1')->group(function (){
-        Route::post('/text-filter',[\App\Http\Controllers\TextFiltrationController::class, 'textFilter']);
+        Route::middleware([\App\Http\Middleware\RequestAuditMiddleware::class])
+            ->post('/text-filter',[\App\Http\Controllers\TextFiltrationController::class, 'textFilter']);
     });
 
 });

@@ -11,7 +11,7 @@ class FilterTextRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return true;
+        return !is_null($this->user());
     }
 
     /**
@@ -22,7 +22,7 @@ class FilterTextRequest extends FormRequest
     public function rules(): array
     {
         return [
-            //
+            'sentence' => 'required'
         ];
     }
 }

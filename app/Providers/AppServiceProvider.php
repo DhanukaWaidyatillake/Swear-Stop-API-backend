@@ -2,8 +2,11 @@
 
 namespace App\Providers;
 
+use App\Events\SaveTextFilterResponseEvent;
+use App\Listeners\SaveTextFilterResponseListener;
 use App\Services\TextFilterService;
 use App\Services\TokenManagerService;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -20,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(TextFilterService::class, function ($app) {
             return new TextFilterService();
         });
+
     }
 
     /**
@@ -27,6 +31,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Event::listen(
+            SaveTextFilterResponseEvent::class,
+            SaveTextFilterResponseListener::class,
+        );
     }
 }
