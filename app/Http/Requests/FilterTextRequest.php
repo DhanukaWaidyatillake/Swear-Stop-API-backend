@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\ProfanityCategory;
 use Illuminate\Foundation\Http\FormRequest;
 
 class FilterTextRequest extends FormRequest
@@ -22,7 +23,16 @@ class FilterTextRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'sentence' => 'required'
+            'sentence' => 'required',
+            'moderation_categories' => 'required|array',
+            'moderation_categories.*' => 'required|string|in:' . implode(',', ProfanityCategory::all()->pluck('profanity_category_code')->toArray()) . ',*,all',
+        ];
+    }
+
+    public function messages()
+    {
+        return [
+            'moderation_categories.*.in' => 'Invalid moderation category specified'
         ];
     }
 }

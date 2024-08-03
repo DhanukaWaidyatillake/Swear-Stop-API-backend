@@ -3,17 +3,29 @@
 namespace App\Services;
 
 use App\Models\BlacklistedWord;
+use App\Models\ProfanityCategory;
 use App\Models\ProfanityWord;
 use App\Models\WhitelistedWord;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Str;
 
 class TextFilterService
 {
-    public function filterText($user_id, $text): array
+    public function filterText($user_id, $text, $moderation_categories): array
     {
         $black_listed_words = BlacklistedWord::query()->where('user_id', $user_id)->where('is_enabled', true)->get()->pluck('word')->toArray();
         $white_listed_words = WhitelistedWord::query()->where('user_id', $user_id)->where('is_enabled', true)->get()->pluck('word')->toArray();
+
+        //TODO : Use Cache for moderation categories
+        if ($moderation_categories[0] == "*" || strtolower($moderation_categories[0]) == "all") {
+            $moderation_category_ids = ProfanityCategory::all()
+                ->pluck('id')
+                ->toArray();
+        } else {
+            $moderation_category_ids = ProfanityCategory::query()
+                ->select('id')
+                ->whereIn('profanity_category_code',$moderation_categories)
+                ->get()->pluck('id');
+        }
 
         $sentence = $text;
         $words = explode(" ", $sentence);
@@ -110,7 +122,7 @@ class TextFilterService
         $banned_words_in_sentence['blacklisted_words'][] = $this->checkingForBlackListedWordsInGivenSentence($black_listed_words, $delimiter, $refined_sentence, $words);
         $banned_words_in_sentence['blacklisted_words'] = Arr::flatten($banned_words_in_sentence['blacklisted_words']);
 
-
+        //TODO : Cache the profanity dataset
         //Check if sentence has words from the profanity dataset (after refining)
         //Checking for word_1 hits (single words)
         ProfanityWord::query()
@@ -119,6 +131,7 @@ class TextFilterService
             ->whereIn('profanity_dataset.word_1', $words)
             ->whereNull('profanity_dataset.word_2')
             ->whereNull('profanity_dataset.word_3')
+            ->whereIn('profanity_dataset.profanity_category_id',$moderation_category_ids)
             ->get()->map(function ($profanity_entry) use (&$banned_words_in_sentence, &$words) {
                 $banned_words_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1;
                 $words = array_diff($words, [$profanity_entry->word_1]);
@@ -136,6 +149,7 @@ class TextFilterService
                 'profanity_dataset.profanity_category_id',
                 'profanity_categories.profanity_category_code'
             )->whereNull('profanity_dataset.word_3')
+            ->whereIn('profanity_dataset.profanity_category_id',$moderation_category_ids)
             ->where(function ($query) use ($words) {
                 for ($i = 0; $i < count($words) - 1; $i++) {
                     $pair = [$words[$i], $words[$i + 1]];
@@ -162,7 +176,9 @@ class TextFilterService
                 'profanity_dataset.word_3',
                 'profanity_dataset.profanity_category_id',
                 'profanity_categories.profanity_category_code'
-            )->where(function ($query) use ($words) {
+            )
+            ->whereIn('profanity_dataset.profanity_category_id',$moderation_category_ids)
+            ->where(function ($query) use ($words) {
                 for ($i = 0; $i < count($words) - 1; $i++) {
                     if (isset($words[$i], $words[$i + 1], $words[$i + 2])) {
                         $pair = [$words[$i], $words[$i + 1], $words[$i + 2]];
