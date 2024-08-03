@@ -14,5 +14,5 @@ class SaveTextFilterResponseEvent
     /**
      * Create a new event instance.
      */
-    public function __construct(public Request $request,public $response=[]){}
+    public function __construct(public $request=[],public $response=[]){}
 }

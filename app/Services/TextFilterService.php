@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\BlacklistedWord;
+use App\Models\ProfanityWord;
+use App\Models\WhitelistedWord;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 
@@ -10,11 +12,13 @@ class TextFilterService
 {
     public function filterText($user_id, $text): array
     {
-        $black_listed_words = BlacklistedWord::query()->where('user_id', $user_id)->where('is_enabled',true)->get()->pluck('word')->toArray();
+        $black_listed_words = BlacklistedWord::query()->where('user_id', $user_id)->where('is_enabled', true)->get()->pluck('word')->toArray();
+        $white_listed_words = WhitelistedWord::query()->where('user_id', $user_id)->where('is_enabled', true)->get()->pluck('word')->toArray();
 
         $sentence = $text;
         $words = explode(" ", $sentence);
         $refined_sentence = "";
+        $white_listed_hits = [];
 
         $banned_words_in_sentence = [];
 
@@ -24,8 +28,16 @@ class TextFilterService
         $charactersNotInString = array_diff($all_delimiters, str_split($all_banned_words_string));
         $delimiter = $charactersNotInString[0];
 
-        //Checking for banned words before refining sentence
-        $banned_words_in_sentence[] = $this->checkingForBannedWordsInGivenSentence($black_listed_words, $delimiter, $sentence, $words);
+        //Removing any white listed words (direct hits)
+        $words_after_removing_whitelist = array_diff($words, $white_listed_words);
+        $white_listed_hits[] = array_diff($words, $words_after_removing_whitelist);
+        $words = $words_after_removing_whitelist;
+
+
+        //Checking for banned words before refining sentence (This is to catch for any direct hits that might be mutated when refining)
+        $banned_words_in_sentence['blacklisted_words'][] = $this->checkingForBlackListedWordsInGivenSentence($black_listed_words, $delimiter, $refined_sentence, $words);
+        $banned_words_in_sentence['blacklisted_words'] = Arr::flatten($banned_words_in_sentence['blacklisted_words']);
+
 
         //Refining sentence
         foreach ($words as $word) {
@@ -88,21 +100,92 @@ class TextFilterService
             }
         }
 
+        //Removing any white listed words (after refining)
+        $words_after_removing_whitelist = array_diff($words_of_refined_sentence, $white_listed_words);
+        $white_listed_hits[] = array_diff($words_of_refined_sentence, $words_after_removing_whitelist);
+        $words = $words_after_removing_whitelist;
+
+
         //Checking for banned words after refining sentence
-        $banned_words_in_sentence[] = $this->checkingForBannedWordsInGivenSentence($black_listed_words, $delimiter, $refined_sentence, $words_of_refined_sentence);
+        $banned_words_in_sentence['blacklisted_words'][] = $this->checkingForBlackListedWordsInGivenSentence($black_listed_words, $delimiter, $refined_sentence, $words);
+        $banned_words_in_sentence['blacklisted_words'] = Arr::flatten($banned_words_in_sentence['blacklisted_words']);
 
-        //removing duplicate occurrences from banned_words_in_sentence array
-        return array_unique(Arr::flatten($banned_words_in_sentence));
+
+        //Check if sentence has words from the profanity dataset (after refining)
+        //Checking for word_1 hits (single words)
+        ProfanityWord::query()
+            ->join('profanity_categories', 'profanity_dataset.profanity_category_id', '=', 'profanity_categories.id')
+            ->select('profanity_dataset.word_1', 'profanity_dataset.profanity_category_id', 'profanity_categories.profanity_category_code')
+            ->whereIn('profanity_dataset.word_1', $words)
+            ->whereNull('profanity_dataset.word_2')
+            ->whereNull('profanity_dataset.word_3')
+            ->get()->map(function ($profanity_entry) use (&$banned_words_in_sentence, &$words) {
+                $banned_words_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1;
+                $words = array_diff($words, [$profanity_entry->word_1]);
+            });
+
+
+        //rearranging indexes of array so that it starts from 0
+        $words = array_values($words);
+        //Checking for word_1 and word_2 hits (2 word phrases) (after refining)
+        ProfanityWord::query()
+            ->join('profanity_categories', 'profanity_dataset.profanity_category_id', '=', 'profanity_categories.id')
+            ->select(
+                'profanity_dataset.word_1',
+                'profanity_dataset.word_2',
+                'profanity_dataset.profanity_category_id',
+                'profanity_categories.profanity_category_code'
+            )->whereNull('profanity_dataset.word_3')
+            ->where(function ($query) use ($words) {
+                for ($i = 0; $i < count($words) - 1; $i++) {
+                    $pair = [$words[$i], $words[$i + 1]];
+                    $query = $query->orWhere(function ($query) use ($pair) {
+                        return $query->where('profanity_dataset.word_1', $pair[0])
+                            ->where('profanity_dataset.word_2', $pair[1]);
+                    });
+                }
+                return $query;
+            })->get()->map(function ($profanity_entry) use (&$banned_words_in_sentence, &$words) {
+                $banned_words_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1 . ' ' . $profanity_entry->word_2;
+                $words = array_diff($words, [$profanity_entry->word_1, $profanity_entry->word_2]);
+            });
+
+
+        //rearranging indexes of array so that it starts from 0
+        $words = array_values($words);
+        //Checking for word_1 and word_2 and word_3 hits (3 word phrases) (after refining)
+        ProfanityWord::query()
+            ->join('profanity_categories', 'profanity_dataset.profanity_category_id', '=', 'profanity_categories.id')
+            ->select(
+                'profanity_dataset.word_1',
+                'profanity_dataset.word_2',
+                'profanity_dataset.word_3',
+                'profanity_dataset.profanity_category_id',
+                'profanity_categories.profanity_category_code'
+            )->where(function ($query) use ($words) {
+                for ($i = 0; $i < count($words) - 1; $i++) {
+                    if (isset($words[$i], $words[$i + 1], $words[$i + 2])) {
+                        $pair = [$words[$i], $words[$i + 1], $words[$i + 2]];
+                        $query = $query->orWhere(function ($query) use ($pair) {
+                            return $query->where('profanity_dataset.word_1', $pair[0])
+                                ->where('profanity_dataset.word_2', $pair[1])
+                                ->where('profanity_dataset.word_3', $pair[2]);
+                        });
+                    }
+                }
+                return $query;
+            })->get()->map(function ($profanity_entry) use (&$banned_words_in_sentence, &$words) {
+                $banned_words_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1 . ' ' . $profanity_entry->word_2 . ' ' . $profanity_entry->word_3;
+                $words = array_diff($words, [$profanity_entry->word_1, $profanity_entry->word_2, $profanity_entry->word_3]);
+            });
+
+        return [
+            'profanity' => $banned_words_in_sentence,
+            'whitelist_hits' => Arr::flatten($white_listed_hits)
+        ];
+
     }
 
-    public function maskText($string, $banned_words): string
-    {
-        foreach ($banned_words as $word) {
-            $maskedWord = Str::mask($word, '*', 1, max(1, strlen($word) - 2));
-            $string = Str::replaceFirst($word, $maskedWord, $string);
-        }
-        return $string;
-    }
 
     /**
      * @param array $black_listed_words
@@ -111,9 +194,9 @@ class TextFilterService
      * @param array $words
      * @return array
      */
-    private function checkingForBannedWordsInGivenSentence(array $black_listed_words, $delimiter, mixed $sentence, array $words): array
+    private function checkingForBlackListedWordsInGivenSentence(array $black_listed_words, $delimiter, mixed $sentence, array $words): array
     {
-        $banned_words_in_given_sentence=[];
+        $banned_words_in_given_sentence = [];
         foreach ($black_listed_words as $banned_word) {
             $banned_word = strtolower($banned_word);
             $pattern = $delimiter . preg_quote($banned_word, $delimiter) . $delimiter . 'i';
