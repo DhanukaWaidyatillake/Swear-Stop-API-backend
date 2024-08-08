@@ -18,10 +18,12 @@ class TextFiltrationController extends Controller
                 'status' => 'success',
                 'profanity' => $filter_result['profanity'],
                 'whitelisted_words_in_text' => $filter_result['whitelist_hits'],
+                'grawlix' => $filter_result['grawlix'],
                 'timestamp' => Carbon::now()->timestamp,
             ];
             $status = 200;
         } catch (\Exception $e) {
+            dd($e->getMessage());
             $response = [
                 'status' => 'failed',
                 'timestamp' => Carbon::now()->timestamp,
