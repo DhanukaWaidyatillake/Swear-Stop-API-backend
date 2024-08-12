@@ -8,6 +8,7 @@ use App\Models\ProfanityWord;
 use App\Models\WhitelistedWord;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Str;
 
 class TextFilterService
 {
@@ -41,7 +42,7 @@ class TextFilterService
         'z' => []
     ];
 
-    private array $symbols = array("!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "-", "_", "+", "=", "{", "}", "[", "]", ":", ";", ",", ".", "<", ">", "/", "?", "|");
+    private array $symbols = array("!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "-", "_", "+", "=", "{", "}", "[", "]", ":", ";", ",", ".", "<", ">", "/", "?", "|", "'");
     private array $numbers = array(1, 2, 3, 4, 5, 6, 7, 8, 9, 0);
 
     public function filterText($user_id, $text, $moderation_categories): array
@@ -65,10 +66,27 @@ class TextFilterService
         $words = explode(" ", $sentence);
         $refined_sentence = "";
         $white_listed_hits = [];
+        $links_in_word = [];
 
-        $words = array_filter($words, function ($word) {
-            return strlen($word) != 1;
+        //Disregarding links,words that have only one character or no characters at all
+        $words = array_filter($words, function ($word) use (&$links_in_word) {
+            $link_identify_pattern = '/\bhttps?:\/\/\S+/i';
+            if (preg_match($link_identify_pattern, $word)) {
+                $links_in_word[] = $word;
+                return false;
+            }
+            return strlen($word) != 1 && $word != "";
         });
+
+
+        // Dealing with words like shit//mothafukin or shit...fuck
+        $pattern = '/([' . preg_quote(implode('', $this->symbols), '/') . '])\1{1,}(?![' . preg_quote(implode('', $this->symbols), '/') . ']*$)/';
+        foreach ($words as $key => $word) {
+            if (preg_match($pattern, $word)) {
+                //Pushing the split words into the main array
+                array_splice($words, $key - 1, 0, preg_split($pattern, $word));
+            }
+        }
 
         $banned_words_in_sentence = [];
         $grawlix = [];
@@ -102,23 +120,29 @@ class TextFilterService
             }
         }
 
-
+        $words_of_refined_sentence = [];
         //Refining sentence
         foreach ($words as $word) {
+
+            $initial_word = $word;
+            $refined_words = [];
+            $refined_word_1 = $word;
+            $refined_word_2 = $word;
+
+            //ctype_digit checks if all the characters in a word are numbers
             if (!ctype_digit($word)) {
 
                 //Removing replacement characters from the words
                 foreach ($this->letter_combinations as $letter => $letter_combination_array) {
                     foreach ($letter_combination_array as $letter_combination_item) {
                         if (str_contains($word, $letter_combination_item)) {
-                            if (in_array($letter_combination_item, $this->symbols)) {
-                                //We create one word by replacing the symbol with the corresponding letter
-                                //We create another word by replacing the symbol with a empty character.
-                                //We then combine these two words with a space in between to create the new word
-                                $word = str_replace($letter_combination_item, $letter, $word) . ' ' . str_replace($letter_combination_item, '', $word);
-                            } else {
-                                $word = str_replace($letter_combination_item, $letter, $word);
-                            }
+                            //We create one word by replacing the symbol with the corresponding letter
+                            //We create another word by replacing the symbol with a empty character.
+                            //We then combine these two words with a space in between to create the new word
+                            $refined_words[] = str_replace($letter_combination_item, $letter, $word);
+                            $refined_words[] = str_replace($letter_combination_item, '', $word);
+                            $refined_word_1 = str_replace($letter_combination_item, $letter, $refined_word_1);
+                            $refined_word_2 = str_replace($letter_combination_item, '', $refined_word_2);
                         }
                     }
                 }
@@ -126,41 +150,48 @@ class TextFilterService
                 //Removing all symbols from the words
                 foreach ($this->symbols as $symbol) {
                     if (strpos($word, $symbol)) {
-                        $word = str_replace($symbol, "", $word);
+                        $refined_words[] = str_replace($symbol, "", $word);
+                        $refined_word_1 = str_replace($symbol, "", $refined_word_1);
+                        $refined_word_2 = str_replace($symbol, "", $refined_word_2);
                     }
                 }
 
                 //removing all numbers from the words
                 foreach ($this->numbers as $number) {
                     if (strpos($word, $number)) {
-                        $word = str_replace($number, "", $word);
+                        $refined_words[] = str_replace($number, "", $word);
+                        $refined_word_1 = str_replace($number, "", $refined_word_1);
+                        $refined_word_2 = str_replace($number, "", $refined_word_2);
                     }
                 }
 
-                $refined_sentence .= $word . ' ';
-            } else {
-                $refined_sentence .= $word . ' ';
+                $refined_words[] = $refined_word_1;
+                $refined_words[] = $refined_word_2;
             }
-        }
 
-        //Removing white spaces from refined sentence
-        $words_of_refined_sentence = explode(" ", $refined_sentence);
-        foreach ($words_of_refined_sentence as $key => $item) {
-            if ($item == "") {
-                unset($words_of_refined_sentence[$key]);
+            $refined_words = array_unique($refined_words);
+
+            foreach ($refined_words as $key => $refined_word) {
+                if ($refined_word != "") {
+                    if (in_array($refined_word, $white_listed_words)) {
+                        //Checking for any white listed words (after refining)
+                        $white_listed_hits[] = $refined_word;
+                        unset($refined_words[$key]);
+                    } else if (in_array($refined_word, $black_listed_words)) {
+                        //Checking for any black listed words (after refining)
+                        $banned_words_in_sentence['blacklisted_words'][] = $refined_word;
+                        unset($refined_words[$key]);
+                    }
+                } else {
+                    unset($refined_words[$key]);
+                }
             }
+
+            $words_of_refined_sentence[] = [
+                'initial_word' => $initial_word,
+                'refined_words' => $refined_words,
+            ];
         }
-
-        //Removing any white listed words (after refining)
-        $words_after_removing_whitelist = array_diff($words_of_refined_sentence, $white_listed_words);
-        $white_listed_hits[] = array_diff($words_of_refined_sentence, $words_after_removing_whitelist);
-        $words = $words_after_removing_whitelist;
-
-
-        //Checking for banned words after refining sentence
-        $banned_words_in_sentence['blacklisted_words'][] = array_intersect($words, $black_listed_words);
-        $banned_words_in_sentence['blacklisted_words'] = array_unique(Arr::flatten($banned_words_in_sentence['blacklisted_words']));
-
 
         //TODO : Cache the profanity dataset
         //Check if sentence has words from the profanity dataset (after refining)
@@ -168,38 +199,51 @@ class TextFilterService
         ProfanityWord::query()
             ->join('profanity_categories', 'profanity_dataset.profanity_category_id', '=', 'profanity_categories.id')
             ->select('profanity_dataset.word_1', 'profanity_dataset.profanity_category_id', 'profanity_categories.profanity_category_code')
-            ->where(function ($query) use ($words) {
-                foreach ($words as $word) {
+            ->where(function ($query) use ($words_of_refined_sentence) {
+
+                $word_search_executed = false;
+                foreach ($words_of_refined_sentence as $word) {
                     //Prevent filtering for non-profanity words by cross-checking if the word exists on Redis
-                    if (!Redis::sismember('words', $word)) {
-                        $query->orWhere(function ($query) use ($word) {
-                            //If there is no exact match, then we check using the INSTR function
-                            $query->where('profanity_dataset.word_1', $word)->orWhereRaw("
+                    if (!$this->checkIfWordInDictionary($word['refined_words'])) {
+
+                        if (!in_array($word['initial_word'], $word['refined_words'])) {
+                            $words_to_check = [$word['initial_word'], ...$word['refined_words']];
+                        } else {
+                            $words_to_check = $word['refined_words'];
+                        }
+
+                        foreach ($words_to_check as $word_to_check) {
+                            $word_search_executed = true;
+                            $query->orWhere(function ($query) use ($word_to_check) {
+                                //If there is no exact match, then we check using the INSTR function
+                                $query->where('profanity_dataset.word_1', $word_to_check)->orWhereRaw("
                                 profanity_dataset.word_1 = (
                                     SELECT pd.word_1
                                     FROM profanity_dataset pd
                                     WHERE (INSTR(?, pd.word_1) > 0)
                                     ORDER BY LENGTH(pd.word_1) DESC
                                     LIMIT 1
-                                )", [$word]
-                            );
-                        });
+                                )", $word_to_check);
+                            });
+                        }
+
                     }
+                }
+
+                if (!$word_search_executed) {
+                    $query->whereNull('profanity_dataset.word_1');
                 }
             })
             ->whereNull('profanity_dataset.word_2')
             ->whereNull('profanity_dataset.word_3')
             ->whereIn('profanity_dataset.profanity_category_id', $moderation_category_ids)
-            ->get()->map(function ($profanity_entry) use (&$banned_words_in_sentence, &$words) {
+            ->get()->map(function ($profanity_entry) use (&$words_of_refined_sentence, &$banned_words_in_sentence) {
                 $banned_words_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1;
-                $words = array_diff($words, [$profanity_entry->word_1]);
             });
 
 
-        //rearranging indexes of array so that it starts from 0
-        $words = array_values($words);
         //Checking for word_1 and word_2 hits (2 word phrases) (after refining)
-        if (sizeof($words) > 1) {
+        if (sizeof($words_of_refined_sentence) > 1) {
             ProfanityWord::query()
                 ->join('profanity_categories', 'profanity_dataset.profanity_category_id', '=', 'profanity_categories.id')
                 ->select(
@@ -209,24 +253,21 @@ class TextFilterService
                     'profanity_categories.profanity_category_code'
                 )->whereNull('profanity_dataset.word_3')
                 ->whereIn('profanity_dataset.profanity_category_id', $moderation_category_ids)
-                ->where(function ($query) use ($words) {
-                    for ($i = 0; $i < count($words) - 1; $i++) {
-                        $pair = [$words[$i], $words[$i + 1]];
+                ->where(function ($query) use ($words_of_refined_sentence) {
+                    for ($i = 0; $i < count($words_of_refined_sentence) - 1; $i++) {
+                        $pair = [$words_of_refined_sentence[$i]['refined_words'], $words_of_refined_sentence[$i + 1]['refined_words']];
                         $query = $query->orWhere(function ($query) use ($pair) {
-                            return $query->where('profanity_dataset.word_1', $pair[0])
-                                ->where('profanity_dataset.word_2', $pair[1]);
+                            return $query->whereIn('profanity_dataset.word_1', $pair[0])
+                                ->whereIn('profanity_dataset.word_2', $pair[1]);
                         });
                     }
                     return $query;
                 })->get()->map(function ($profanity_entry) use (&$banned_words_in_sentence, &$words) {
                     $banned_words_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1 . ' ' . $profanity_entry->word_2;
-                    $words = array_diff($words, [$profanity_entry->word_1, $profanity_entry->word_2]);
                 });
         }
 
-        if (sizeof($words) > 2) {
-            //rearranging indexes of array so that it starts from 0
-            $words = array_values($words);
+        if (sizeof($words_of_refined_sentence) > 2) {
             //Checking for word_1 and word_2 and word_3 hits (3 word phrases) (after refining)
             ProfanityWord::query()
                 ->join('profanity_categories', 'profanity_dataset.profanity_category_id', '=', 'profanity_categories.id')
@@ -238,29 +279,73 @@ class TextFilterService
                     'profanity_categories.profanity_category_code'
                 )
                 ->whereIn('profanity_dataset.profanity_category_id', $moderation_category_ids)
-                ->where(function ($query) use ($words) {
-                    for ($i = 0; $i < count($words) - 1; $i++) {
-                        if (isset($words[$i], $words[$i + 1], $words[$i + 2])) {
-                            $pair = [$words[$i], $words[$i + 1], $words[$i + 2]];
+                ->where(function ($query) use ($words_of_refined_sentence) {
+                    for ($i = 0; $i < count($words_of_refined_sentence) - 1; $i++) {
+                        if (isset($words_of_refined_sentence[$i], $words_of_refined_sentence[$i + 1], $words_of_refined_sentence[$i + 2])) {
+                            $pair = [$words_of_refined_sentence[$i]['refined_words'], $words_of_refined_sentence[$i + 1]['refined_words'], $words_of_refined_sentence[$i + 2]['refined_words']];
                             $query = $query->orWhere(function ($query) use ($pair) {
-                                return $query->where('profanity_dataset.word_1', $pair[0])
-                                    ->where('profanity_dataset.word_2', $pair[1])
-                                    ->where('profanity_dataset.word_3', $pair[2]);
+                                return $query->whereIn('profanity_dataset.word_1', $pair[0])
+                                    ->whereIn('profanity_dataset.word_2', $pair[1])
+                                    ->whereIn('profanity_dataset.word_3', $pair[2]);
                             });
                         }
                     }
                     return $query;
                 })->get()->map(function ($profanity_entry) use (&$banned_words_in_sentence, &$words) {
                     $banned_words_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1 . ' ' . $profanity_entry->word_2 . ' ' . $profanity_entry->word_3;
-                    $words = array_diff($words, [$profanity_entry->word_1, $profanity_entry->word_2, $profanity_entry->word_3]);
                 });
+        }
+
+        //Removing any duplicate blacklisted words
+        $banned_words_in_sentence['blacklisted_words'] = array_unique(Arr::flatten($banned_words_in_sentence['blacklisted_words']));
+        foreach ($banned_words_in_sentence as $key => $banned_words_array) {
+            if ($key != 'blacklisted_words') {
+                usort($banned_words_array, function ($a, $b) {
+                    return strlen($b) - strlen($a);
+                });
+
+                $filteredWords = [];
+
+                foreach ($banned_words_array as $word) {
+                    $isContained = false;
+
+                    foreach ($filteredWords as $filteredWord) {
+                        if (str_contains($filteredWord, $word)) {
+                            $isContained = true;
+                            break;
+                        }
+                    }
+
+                    if (!$isContained) {
+                        $filteredWords[] = $word;
+                    }
+                }
+
+                $banned_words_in_sentence[$key] = $filteredWords;
+            }
         }
 
         return [
             'profanity' => $banned_words_in_sentence,
             'whitelist_hits' => Arr::flatten($white_listed_hits),
+            'links' => $links_in_word,
             'grawlix' => $grawlix
         ];
 
+    }
+
+    private function checkIfWordInDictionary(string|array $words): bool
+    {
+        if (is_array($words)) {
+            foreach ($words as $item) {
+                if (Redis::sismember('words', strtolower($item))) {
+                    return true;
+                }
+            }
+        } else {
+            return Redis::sismember('words', strtolower($words));
+        }
+
+        return false;
     }
 }
