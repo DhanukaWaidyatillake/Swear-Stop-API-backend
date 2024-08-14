@@ -11,7 +11,7 @@ class TextFiltrationController extends Controller
 {
     public function textFilter(FilterTextRequest $request, TextFilterService $textFilterService)
     {
-        try {
+//        try {
             $data = $request->validated();
             $filter_result = $textFilterService->filterText($request->user()->id, $data['sentence'], $data['moderation_categories']);
             $response = [
@@ -22,15 +22,15 @@ class TextFiltrationController extends Controller
                 'timestamp' => Carbon::now()->timestamp,
             ];
             $status = 200;
-        } catch (\Exception $e) {
-            dd($e->getMessage());
-            $response = [
-                'status' => 'failed',
-                'timestamp' => Carbon::now()->timestamp,
-                'error_message' => 'Server Error'
-            ];
-            $status = 500;
-        }
+//        } catch (\Exception $e) {
+//            dd($e->getTraceAsString());
+//            $response = [
+//                'status' => 'failed',
+//                'timestamp' => Carbon::now()->timestamp,
+//                'error_message' => 'Server Error'
+//            ];
+//            $status = 500;
+//        }
 
         SaveTextFilterResponseEvent::dispatch($request->all(), $response);
 

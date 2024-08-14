@@ -8,7 +8,6 @@ use App\Models\ProfanityWord;
 use App\Models\WhitelistedWord;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Redis;
-use Illuminate\Support\Str;
 
 class TextFilterService
 {
@@ -64,7 +63,6 @@ class TextFilterService
 
         $sentence = $text;
         $words = explode(" ", $sentence);
-        $refined_sentence = "";
         $white_listed_hits = [];
         $links_in_word = [];
 
@@ -89,6 +87,7 @@ class TextFilterService
         }
 
         $banned_words_in_sentence = [];
+        $banned_phrases_in_sentence = [];
         $grawlix = [];
 
         //Determining delimiter
@@ -113,12 +112,17 @@ class TextFilterService
                 //If word starts with a letter and has only symbols
                 $grawlix[] = $word;
                 unset($words[$key]);
+            } else if (preg_match($delimiter . '^[a-zA-Z]{2}(?=[^a-zA-Z]*$)(?=.*[!@#$%^&*()_\-+=\{\}\[\]:;,.<>\/?|\|])' . $delimiter, $word) === 1) {
+                //If a word has only symbols and letters
+                $grawlix[] = $word;
+                unset($words[$key]);
             } else if (preg_match($delimiter . '^[\d\W_]+$' . $delimiter, $word) === 1) {
                 //If a word has only symbols and letters
                 $grawlix[] = $word;
                 unset($words[$key]);
             }
         }
+
 
         $words_of_refined_sentence = [];
         //Refining sentence
@@ -214,7 +218,7 @@ class TextFilterService
 
                         foreach ($words_to_check as $word_to_check) {
                             $word_search_executed = true;
-                            $query->orWhere(function ($query) use ($word_to_check) {
+                            $query->orWhere(function ($query) use ($word_to_check, $word) {
                                 //If there is no exact match, then we check using the INSTR function
                                 $query->where('profanity_dataset.word_1', $word_to_check)->orWhereRaw("
                                 profanity_dataset.word_1 = (
@@ -223,10 +227,10 @@ class TextFilterService
                                     WHERE (INSTR(?, pd.word_1) > 0)
                                     ORDER BY LENGTH(pd.word_1) DESC
                                     LIMIT 1
-                                )", $word_to_check);
+                                )", [$word_to_check]);
                             });
-                        }
 
+                        }
                     }
                 }
 
@@ -262,8 +266,8 @@ class TextFilterService
                         });
                     }
                     return $query;
-                })->get()->map(function ($profanity_entry) use (&$banned_words_in_sentence, &$words) {
-                    $banned_words_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1 . ' ' . $profanity_entry->word_2;
+                })->get()->map(function ($profanity_entry) use (&$banned_phrases_in_sentence, &$words) {
+                    $banned_phrases_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1 . ' ' . $profanity_entry->word_2;
                 });
         }
 
@@ -291,8 +295,8 @@ class TextFilterService
                         }
                     }
                     return $query;
-                })->get()->map(function ($profanity_entry) use (&$banned_words_in_sentence, &$words) {
-                    $banned_words_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1 . ' ' . $profanity_entry->word_2 . ' ' . $profanity_entry->word_3;
+                })->get()->map(function ($profanity_entry) use (&$banned_phrases_in_sentence, &$words) {
+                    $banned_phrases_in_sentence[$profanity_entry->profanity_category_code][] = $profanity_entry->word_1 . ' ' . $profanity_entry->word_2 . ' ' . $profanity_entry->word_3;
                 });
         }
 
@@ -318,15 +322,28 @@ class TextFilterService
 
                     if (!$isContained) {
                         $filteredWords[] = $word;
+
                     }
                 }
-
                 $banned_words_in_sentence[$key] = $filteredWords;
             }
         }
 
+        // adding the original word (word in sentence) along with the detected word
+        $banned_word_with_original_word = [];
+        foreach ($banned_words_in_sentence as $key => $items) {
+            foreach ($items as $word) {
+                $banned_word_with_original_word[$key][] = [
+                    'flagged_word' => $word,
+                    'sentence_token' => $this->findOriginalWord($words_of_refined_sentence, $word)];
+            }
+        }
+
         return [
-            'profanity' => $banned_words_in_sentence,
+            'profanity' => [
+                'words' => $banned_word_with_original_word,
+                'phrases' => $banned_phrases_in_sentence
+            ],
             'whitelist_hits' => Arr::flatten($white_listed_hits),
             'links' => $links_in_word,
             'grawlix' => $grawlix
@@ -347,5 +364,24 @@ class TextFilterService
         }
 
         return false;
+    }
+
+    private function findOriginalWord($original_words_array, $word)
+    {
+        $original_word = "N/A";
+
+        foreach ($original_words_array as $item) {
+            foreach ($item['refined_words'] as $refined_word) {
+                if ($refined_word == $word) {
+                    $original_word = $item['initial_word'];
+                    break;
+                } else if (preg_match('/' . $word . '/', $refined_word)) {
+                    $original_word = $item['initial_word'];
+                    break;
+                }
+            }
+        }
+
+        return $original_word;
     }
 }
