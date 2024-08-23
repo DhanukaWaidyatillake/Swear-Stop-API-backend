@@ -5,11 +5,12 @@
     "keywords": ["laravel", "framework"],
     "license": "MIT",
     "require": {
-        "php": "^8.2",
+        "php": "^7.4",
         "ext-openssl": "*",
         "laravel/framework": "^11.9",
         "laravel/horizon": "^5.26",
-        "laravel/tinker": "^2.9"
+        "laravel/tinker": "^2.9",
+        "ext-json": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

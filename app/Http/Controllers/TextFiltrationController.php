@@ -32,7 +32,7 @@ class TextFiltrationController extends Controller
 //            $status = 500;
 //        }
 
-        SaveTextFilterResponseEvent::dispatch($request->all(), $response);
+        SaveTextFilterResponseEvent::dispatch($request, $response);
 
         return response($response, $status);
 

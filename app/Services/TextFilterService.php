@@ -13,7 +13,7 @@ class TextFilterService
 {
 
     private array $letter_combinations = [
-        'a' => ['α', '4', 'ⓐ', '⒜', 'ᾰ', 'ḁ', 'ἀ', 'ἁ', 'ἂ', 'ἃ', 'ἄ', 'ἅ', 'ἆ', 'ἇ', 'ạ', 'ả', 'ầ', 'ấ', 'ẩ', 'ẫ', 'ậ', 'ắ', 'ằ', 'ẳ', 'ẵ', 'ặ', 'ẚ', 'ᾱ', 'ᾲ', 'ᾳ', 'ᾴ', 'ᾶ', 'ᾷ', 'Ѧ', 'Ặ', 'Ἀ', 'Ἁ', 'Ἂ', 'Ἃ', 'Ἄ', 'Ἅ', 'Ἆ', 'Ἇ', 'Ạ', 'Ả', 'Ấ', 'Ầ', 'Ẩ', 'Ẫ', 'Ậ', 'Ắ', 'Ằ', 'Ẳ', 'Ẵ'],
+        'a' => ['α', '4', 'ⓐ', '⒜', 'ᾰ', 'ḁ', 'ἀ', 'ἁ', 'ἂ', 'ἃ', 'ἄ', 'ἅ', 'ἆ', 'ἇ', 'ạ', 'ả', 'ầ', 'ấ', 'ẩ', 'ẫ', 'ậ', 'ắ', 'ằ', 'ẳ', 'ẵ', 'ặ', 'ẚ', 'ᾱ', 'ᾲ', 'ᾳ', 'ᾴ', 'ᾶ', 'ᾷ', 'Ѧ', 'Ặ', 'Ἀ', 'Ἁ', 'Ἂ', 'Ἃ', 'Ἄ', 'Ἅ', 'Ἆ', 'Ἇ', 'Ạ', 'Ả', 'Ấ', 'Ầ', 'Ẩ', 'Ẫ', 'Ậ', 'Ắ', 'Ằ', 'Ẳ', 'Ẵ', '@'],
         'b' => ['⒝', 'ദ', '൫', '♭', 'ḃ', 'ḅ', 'ḇ', 'ℬ', 'Ḃ', 'Ḅ', 'Ḇ'],
         'c' => ['ⓒ', '⒞', 'ḉ', 'ℂ', 'ℭ', '℃', '₡', '∁'],
         'd' => ['ⓓ', '⒟', 'ⅾ', 'ḋ', 'ḍ', 'ḏ', 'ḑ', 'ḓ', 'Ḓ', 'Ḋ', 'Ḍ', 'Ḏ', 'Ḑ'],
@@ -77,12 +77,26 @@ class TextFilterService
         });
 
 
-        // Dealing with words like shit//mothafukin or shit...fuck
+        // Dealing with words like 'shit//mothafukin' or 'shit...fuck'
+        // This doesn't catch words like 'holidays...!!!'
         $pattern = '/([' . preg_quote(implode('', $this->symbols), '/') . '])\1{1,}(?![' . preg_quote(implode('', $this->symbols), '/') . ']*$)/';
         foreach ($words as $key => $word) {
+            $split = [];
+
             if (preg_match($pattern, $word)) {
                 //Pushing the split words into the main array
-                array_splice($words, $key - 1, 0, preg_split($pattern, $word));
+                $split = preg_split($pattern, $word);
+            } else if (str_contains($word, '/')) {
+                $split = explode('/', $word);
+            }
+
+            if (sizeof(array_filter($split)) > 1) {
+                if ($this->checkIfAllWordInDictionary($split)) {
+                    //If the phrase is something like 'Good...afternoon' then we skip it since both words are available in the dictionary
+                    unset($words[$key]);
+                } else {
+                    array_splice($words, $key - 1, 0, $split);
+                }
             }
         }
 
@@ -113,11 +127,11 @@ class TextFilterService
                 $grawlix[] = $word;
                 unset($words[$key]);
             } else if (preg_match($delimiter . '^[a-zA-Z]{2}(?=[^a-zA-Z]*$)(?=.*[!@#$%^&*()_\-+=\{\}\[\]:;,.<>\/?|\|])' . $delimiter, $word) === 1) {
-                //If a word has only symbols and letters
+                //If word starts with two letters and has only symbols
                 $grawlix[] = $word;
                 unset($words[$key]);
             } else if (preg_match($delimiter . '^[\d\W_]+$' . $delimiter, $word) === 1) {
-                //If a word has only symbols and letters
+                // Checks if the string contains only digits (\d), non-word characters (\W), or underscores (_).
                 $grawlix[] = $word;
                 unset($words[$key]);
             }
@@ -141,8 +155,7 @@ class TextFilterService
                     foreach ($letter_combination_array as $letter_combination_item) {
                         if (str_contains($word, $letter_combination_item)) {
                             //We create one word by replacing the symbol with the corresponding letter
-                            //We create another word by replacing the symbol with a empty character.
-                            //We then combine these two words with a space in between to create the new word
+                            //We create another word by replacing the symbol with an empty character.
                             $refined_words[] = str_replace($letter_combination_item, $letter, $word);
                             $refined_words[] = str_replace($letter_combination_item, '', $word);
                             $refined_word_1 = str_replace($letter_combination_item, $letter, $refined_word_1);
@@ -153,7 +166,7 @@ class TextFilterService
 
                 //Removing all symbols from the words
                 foreach ($this->symbols as $symbol) {
-                    if (strpos($word, $symbol)) {
+                    if (str_contains($word, $symbol)) {
                         $refined_words[] = str_replace($symbol, "", $word);
                         $refined_word_1 = str_replace($symbol, "", $refined_word_1);
                         $refined_word_2 = str_replace($symbol, "", $refined_word_2);
@@ -161,20 +174,26 @@ class TextFilterService
                 }
 
                 //removing all numbers from the words
-                foreach ($this->numbers as $number) {
-                    if (strpos($word, $number)) {
-                        $refined_words[] = str_replace($number, "", $word);
-                        $refined_word_1 = str_replace($number, "", $refined_word_1);
-                        $refined_word_2 = str_replace($number, "", $refined_word_2);
-                    }
-                }
+                $refined_words[] = preg_replace('/\d/', '', $word);
+                $refined_word_1 = preg_replace('/\d/', '', $word);
+                $refined_word_2 = preg_replace('/\d/', '', $word);
+
 
                 $refined_words[] = $refined_word_1;
                 $refined_words[] = $refined_word_2;
+
+                //if consecutive repeated characters are at the end of string, we create another refined word by removing all the repeated characters (eg : hellooo -> hello)
+                foreach ($refined_words as $refined_word) {
+                    if (preg_match('/(.)\1+$/', $refined_word)) {
+                        $refined_words[] = preg_replace('/(.)\1+$/', '$1', $refined_word);
+                    }
+                }
+
             }
 
             $refined_words = array_unique($refined_words);
 
+            //removing whitelisted words from refined_words array
             foreach ($refined_words as $key => $refined_word) {
                 if ($refined_word != "") {
                     if (in_array($refined_word, $white_listed_words)) {
@@ -197,6 +216,8 @@ class TextFilterService
             ];
         }
 
+//        dd($words_of_refined_sentence);
+
         //TODO : Cache the profanity dataset
         //Check if sentence has words from the profanity dataset (after refining)
         //Checking for word_1 hits (single words)
@@ -208,7 +229,7 @@ class TextFilterService
                 $word_search_executed = false;
                 foreach ($words_of_refined_sentence as $word) {
                     //Prevent filtering for non-profanity words by cross-checking if the word exists on Redis
-                    if (!$this->checkIfWordInDictionary($word['refined_words'])) {
+                    if (!$this->checkIfAtLeastOneWordInDictionary($word['refined_words'])) {
 
                         if (!in_array($word['initial_word'], $word['refined_words'])) {
                             $words_to_check = [$word['initial_word'], ...$word['refined_words']];
@@ -217,19 +238,26 @@ class TextFilterService
                         }
 
                         foreach ($words_to_check as $word_to_check) {
+
+                            //removing consecutive repeated characters at the end of a string
                             $word_search_executed = true;
                             $query->orWhere(function ($query) use ($word_to_check, $word) {
-                                //If there is no exact match, then we check using the INSTR function
-                                $query->where('profanity_dataset.word_1', $word_to_check)->orWhereRaw("
-                                profanity_dataset.word_1 = (
-                                    SELECT pd.word_1
-                                    FROM profanity_dataset pd
-                                    WHERE (INSTR(?, pd.word_1) > 0)
-                                    ORDER BY LENGTH(pd.word_1) DESC
-                                    LIMIT 1
-                                )", [$word_to_check]);
+                                $query->where(function ($query) use ($word_to_check) {
+                                    $query->whereRaw('CHAR_LENGTH(profanity_dataset.word_1) < 3')
+                                        ->where('profanity_dataset.word_1', $word_to_check);
+                                })->orWhere(function ($query) use ($word_to_check) {
+                                    $query->whereRaw('CHAR_LENGTH(profanity_dataset.word_1) >= 3')
+                                        ->whereRaw("
+                                             profanity_dataset.word_1 = (
+                                                 SELECT pd.word_1
+                                                 FROM profanity_dataset pd
+                                                 WHERE (INSTR(?, pd.word_1) > 0)
+                                                 ORDER BY LENGTH(pd.word_1) DESC
+                                                 LIMIT 1
+                                             )", [$word_to_check]
+                                        );
+                                });
                             });
-
                         }
                     }
                 }
@@ -329,13 +357,18 @@ class TextFilterService
             }
         }
 
-        // adding the original word (word in sentence) along with the detected word
+        // Unsetting words with low identifiably and adding the original word (word in sentence) along with the detected word
         $banned_word_with_original_word = [];
         foreach ($banned_words_in_sentence as $key => $items) {
             foreach ($items as $word) {
-                $banned_word_with_original_word[$key][] = [
-                    'flagged_word' => $word,
-                    'sentence_token' => $this->findOriginalWord($words_of_refined_sentence, $word)];
+                $original_word = $this->findOriginalWord($words_of_refined_sentence, $word);
+
+                if ($this->countLettersBeforeAndAfterSubstring($original_word, $word) < 4) {
+                    $banned_word_with_original_word[$key][] = [
+                        'flagged_word' => $word,
+                        'sentence_token' => $original_word
+                    ];
+                }
             }
         }
 
@@ -351,20 +384,36 @@ class TextFilterService
 
     }
 
-    private function checkIfWordInDictionary(string|array $words): bool
+    private function checkIfAtLeastOneWordInDictionary(array $words): bool
     {
-        if (is_array($words)) {
-            foreach ($words as $item) {
-                if (Redis::sismember('words', strtolower($item))) {
-                    return true;
-                }
+        if (empty($words)) {
+            return false;
+        }
+
+        foreach ($words as $item) {
+            if (Redis::sismember('words', strtolower($item))) {
+                return true;
             }
-        } else {
-            return Redis::sismember('words', strtolower($words));
         }
 
         return false;
     }
+
+    private function checkIfAllWordInDictionary(array $words): bool
+    {
+        if (empty($words)) {
+            return false;
+        }
+
+        foreach ($words as $item) {
+            if (!Redis::sismember('words', strtolower($item))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
 
     private function findOriginalWord($original_words_array, $word)
     {
@@ -372,16 +421,59 @@ class TextFilterService
 
         foreach ($original_words_array as $item) {
             foreach ($item['refined_words'] as $refined_word) {
-                if ($refined_word == $word) {
-                    $original_word = $item['initial_word'];
-                    break;
-                } else if (preg_match('/' . $word . '/', $refined_word)) {
-                    $original_word = $item['initial_word'];
-                    break;
+                if (strlen($word) < 3) {
+                    if ($refined_word == $word) {
+                        $original_word = $item['initial_word'];
+                        break 2;
+                    }
+                } else {
+                    if ($refined_word == $word) {
+                        $original_word = $item['initial_word'];
+                        break 2;
+                    } else if (preg_match('/' . $word . '/i', $refined_word)) {
+                        $original_word = $item['initial_word'];
+                        break 2;
+                    }
                 }
             }
         }
-
         return $original_word;
+    }
+
+    function countLettersBeforeAndAfterSubstring($word, $substring): int
+    {
+        // Convert the word to lowercase and the substring to lowercase
+        $word = strtolower($word);
+        $substring = strtolower($substring);
+
+        // Find the position of the substring within the word
+        $position = strpos($word, $substring);
+
+        // If the substring is not found, return 0
+        if ($position === false) {
+            return 0;
+        }
+
+        // Extract the portion of the word before and after the substring
+        $beforeSubstring = substr($word, 0, $position);
+        $afterSubstring = substr($word, $position + strlen($substring));
+
+        // Count only the letters in the portions before and after the substring
+        $letterCountBefore = 0;
+        $letterCountAfter = 0;
+
+        for ($i = 0; $i < strlen($beforeSubstring); $i++) {
+            if (ctype_alpha($beforeSubstring[$i])) {
+                $letterCountBefore++;
+            }
+        }
+
+        for ($i = 0; $i < strlen($afterSubstring); $i++) {
+            if (ctype_alpha($afterSubstring[$i])) {
+                $letterCountAfter++;
+            }
+        }
+
+        return $letterCountBefore + $letterCountAfter;
     }
 }
