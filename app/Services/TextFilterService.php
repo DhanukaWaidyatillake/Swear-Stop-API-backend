@@ -182,13 +182,23 @@ class TextFilterService
                 $refined_words[] = $refined_word_1;
                 $refined_words[] = $refined_word_2;
 
-                //if consecutive repeated characters are at the end of string, we create another refined word by removing all the repeated characters (eg : hellooo -> hello)
                 foreach ($refined_words as $refined_word) {
+                    //if consecutive repeated characters are at the end of string, we create another refined word by removing all the repeated characters (eg : hellooo -> hello)
                     if (preg_match('/(.)\1+$/', $refined_word)) {
                         $refined_words[] = preg_replace('/(.)\1+$/', '$1', $refined_word);
                     }
-                }
 
+                    //If word has a single dash in the middle, we break this word into to words (co-operating -> co,operating)
+                    if (preg_match('/^[a-zA-Z]+-[a-zA-Z]+$/', $refined_word)) {
+                        $exploded_words = explode('-', $refined_word);
+                        foreach ($exploded_words as $key => $exploded_word) {
+                            if ($this->checkIfAtLeastOneWordInDictionary([$exploded_word])) {
+                                unset($exploded_words[$key]);
+                            }
+                        }
+                        $refined_words = array_merge($refined_words, $exploded_words);
+                    }
+                }
             }
 
             $refined_words = array_unique($refined_words);
@@ -216,7 +226,6 @@ class TextFilterService
             ];
         }
 
-//        dd($words_of_refined_sentence);
 
         //TODO : Cache the profanity dataset
         //Check if sentence has words from the profanity dataset (after refining)
@@ -228,6 +237,7 @@ class TextFilterService
 
                 $word_search_executed = false;
                 foreach ($words_of_refined_sentence as $word) {
+
                     //Prevent filtering for non-profanity words by cross-checking if the word exists on Redis
                     if (!$this->checkIfAtLeastOneWordInDictionary($word['refined_words'])) {
 
@@ -363,11 +373,18 @@ class TextFilterService
             foreach ($items as $word) {
                 $original_word = $this->findOriginalWord($words_of_refined_sentence, $word);
 
-                if ($this->countLettersBeforeAndAfterSubstring($original_word, $word) < 4) {
+                if (preg_match('/^[a-zA-Z]+-[a-zA-Z]+$/', $original_word)) {
                     $banned_word_with_original_word[$key][] = [
                         'flagged_word' => $word,
                         'sentence_token' => $original_word
                     ];
+                } else {
+                    if ($this->countLettersBeforeAndAfterSubstring($original_word, $word) < 4) {
+                        $banned_word_with_original_word[$key][] = [
+                            'flagged_word' => $word,
+                            'sentence_token' => $original_word
+                        ];
+                    }
                 }
             }
         }
