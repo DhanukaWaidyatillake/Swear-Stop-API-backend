@@ -20,7 +20,7 @@ class SaveTextFilterResponseListener implements ShouldQueue
         TextFilterAudit::query()->find($event->request['text_filter_audit_id'])->update([
             'response_body' => json_encode($event->response, JSON_PRETTY_PRINT),
             'is_successful' => true,
-            'is_free_request' => ($free_request_count > 0)
+            'is_free_request' => ($free_request_count != 0)
         ]);
 
         //Decrementing the free requests count if not 0

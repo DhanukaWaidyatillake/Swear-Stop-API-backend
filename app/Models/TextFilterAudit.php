@@ -11,5 +11,11 @@ class TextFilterAudit extends Model
 
     protected $table = 'text_filter_audits';
 
-    protected $fillable = ['user_id','request_body','response_body','is_successful'];
+    protected $fillable = [
+        'user_id',
+        'request_body',
+        'response_body',
+        'is_successful',
+        'is_free_request'
+    ];
 }
