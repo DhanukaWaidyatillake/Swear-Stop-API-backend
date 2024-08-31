@@ -16,6 +16,8 @@ class TextFilterAudit extends Model
         'request_body',
         'response_body',
         'is_successful',
-        'is_free_request'
+        'is_free_request',
+        'profanity_caught',
+        'profanity_categories_caught',
     ];
 }
