@@ -5,7 +5,7 @@
     "keywords": ["laravel", "framework"],
     "license": "MIT",
     "require": {
-        "php": "^7.4",
+        "php": "^8.2",
         "ext-openssl": "*",
         "laravel/framework": "^11.9",
         "laravel/horizon": "^5.26",
