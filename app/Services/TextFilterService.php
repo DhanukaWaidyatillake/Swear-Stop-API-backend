@@ -41,13 +41,22 @@ class TextFilterService
         'z' => []
     ];
 
-    private array $symbols = array("!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "-", "_", "+", "=", "{", "}", "[", "]", ":", ";", ",", ".", "<", ">", "/", "?", "|", "'");
-    private array $numbers = array(1, 2, 3, 4, 5, 6, 7, 8, 9, 0);
+    private array $symbols = array("!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "-", "_", "+", "=", "{", "}", "[", "]", ":", ";", ",", ".", "<", ">", "/", "?", "|", "'", "ᅳ");
 
-    public function filterText($user_id, $text, $moderation_categories): array
+    public function filterText($text, $moderation_categories, $user_id = null): array
     {
-        $black_listed_words = BlacklistedWord::query()->where('user_id', $user_id)->where('is_enabled', true)->get()->pluck('word')->toArray();
-        $white_listed_words = WhitelistedWord::query()->where('user_id', $user_id)->where('is_enabled', true)->get()->pluck('word')->toArray();
+
+        $banned_words_in_sentence = [];
+        $banned_phrases_in_sentence = [];
+        $grawlix = [];
+
+        if ($user_id) {
+            $black_listed_words = BlacklistedWord::query()->where('user_id', $user_id)->where('is_enabled', true)->get()->pluck('word')->toArray();
+            $white_listed_words = WhitelistedWord::query()->where('user_id', $user_id)->where('is_enabled', true)->get()->pluck('word')->toArray();
+        } else {
+            $black_listed_words = [];
+            $white_listed_words = [];
+        }
 
         //TODO : Use Cache for moderation categories
         if ($moderation_categories[0] == "*" || strtolower($moderation_categories[0]) == "all") {
@@ -61,13 +70,43 @@ class TextFilterService
                 ->get()->pluck('id');
         }
 
+
         $sentence = $text;
         $words = explode(" ", $sentence);
         $white_listed_hits = [];
         $links_in_word = [];
 
+        //Determining delimiter
+        $all_banned_words_string = implode($black_listed_words);
+        $all_delimiters = ["/", "#", "~", "!", "|", "@", "%", "&", "^", "*"];
+        $charactersNotInString = array_diff($all_delimiters, str_split($all_banned_words_string));
+        $delimiter = $charactersNotInString[0];
+
+        //Detecting segregated words (word potentially hidden by separating the characters ; eg - B * O ** O * B * S)
+        $potentially_segregated_word = [];
+        $single_segregated_word = [];
+        $last_key = array_key_last($words);
+        foreach ($words as $key => $word) {
+            if (strlen($word) == 1 || preg_match('/^[' . preg_quote(implode('', $this->symbols), $delimiter) . ']+$/', $word) || trim($word) === '') {
+                $single_segregated_word[] = $word;
+            } else {
+                if (!empty($single_segregated_word)) {
+                    $potentially_segregated_word[] = $single_segregated_word;
+                    $single_segregated_word = [];
+                }
+            }
+            if (($key == $last_key) && !empty($single_segregated_word)) {
+                $potentially_segregated_word[] = $single_segregated_word;
+            }
+        }
+
+        foreach ($potentially_segregated_word as $item) {
+            $words[] = implode('', $item);
+        }
+
+
         //Disregarding links,words that have only one character or no characters at all
-        $words = array_filter($words, function ($word) use (&$links_in_word) {
+        $words = array_filter($words, function ($word) use (&$links_in_word, &$potentially_segregated_word) {
             $link_identify_pattern = '/\bhttps?:\/\/\S+/i';
             if (preg_match($link_identify_pattern, $word)) {
                 $links_in_word[] = $word;
@@ -100,16 +139,6 @@ class TextFilterService
             }
         }
 
-        $banned_words_in_sentence = [];
-        $banned_phrases_in_sentence = [];
-        $grawlix = [];
-
-        //Determining delimiter
-        $all_banned_words_string = implode($black_listed_words);
-        $all_delimiters = ["/", "#", "~", "!", "|", "@", "%", "&", "^", "*"];
-        $charactersNotInString = array_diff($all_delimiters, str_split($all_banned_words_string));
-        $delimiter = $charactersNotInString[0];
-
         //Removing any white listed words (direct hits)
         $words_after_removing_whitelist = array_diff($words, $white_listed_words);
         $white_listed_hits[] = array_diff($words, $words_after_removing_whitelist);
@@ -136,7 +165,6 @@ class TextFilterService
                 unset($words[$key]);
             }
         }
-
 
         $words_of_refined_sentence = [];
         //Refining sentence
@@ -175,8 +203,8 @@ class TextFilterService
 
                 //removing all numbers from the words
                 $refined_words[] = preg_replace('/\d/', '', $word);
-                $refined_word_1 = preg_replace('/\d/', '', $word);
-                $refined_word_2 = preg_replace('/\d/', '', $word);
+                $refined_word_1 = preg_replace('/\d/', '', $refined_word_1);
+                $refined_word_2 = preg_replace('/\d/', '', $refined_word_2);
 
 
                 $refined_words[] = $refined_word_1;
@@ -184,8 +212,8 @@ class TextFilterService
 
                 foreach ($refined_words as $refined_word) {
                     //if consecutive repeated characters are at the end of string, we create another refined word by removing all the repeated characters (eg : hellooo -> hello)
-                    if (preg_match('/(.)\1+$/', $refined_word)) {
-                        $refined_words[] = preg_replace('/(.)\1+$/', '$1', $refined_word);
+                    if (preg_match('/(.)\1{2,}$/', $refined_word)) {
+                        $refined_words[] = preg_replace('/(.)\1{2,}$/', '$1', $refined_word);
                     }
 
                     //If word has a single dash in the middle, we break this word into to words (co-operating -> co,operating)
@@ -200,6 +228,7 @@ class TextFilterService
                     }
                 }
             }
+
 
             $refined_words = array_unique($refined_words);
 
@@ -226,6 +255,8 @@ class TextFilterService
             ];
         }
 
+        //We maintain an array to keep the founds that we found in the redis
+        $words_found_in_redis = [];
 
         //TODO : Cache the profanity dataset
         //Check if sentence has words from the profanity dataset (after refining)
@@ -233,7 +264,7 @@ class TextFilterService
         ProfanityWord::query()
             ->join('profanity_categories', 'profanity_dataset.profanity_category_id', '=', 'profanity_categories.id')
             ->select('profanity_dataset.word_1', 'profanity_dataset.profanity_category_id', 'profanity_categories.profanity_category_code')
-            ->where(function ($query) use ($words_of_refined_sentence) {
+            ->where(function ($query) use ($words_of_refined_sentence, &$words_found_in_redis) {
 
                 $word_search_executed = false;
                 foreach ($words_of_refined_sentence as $word) {
@@ -269,6 +300,8 @@ class TextFilterService
                                 });
                             });
                         }
+                    } else {
+                        $words_found_in_redis[] = $word['initial_word'];
                     }
                 }
 
@@ -340,6 +373,8 @@ class TextFilterService
 
         //Removing any duplicate blacklisted words
         $banned_words_in_sentence['blacklisted_words'] = array_unique(Arr::flatten($banned_words_in_sentence['blacklisted_words']));
+
+        //Removing duplicates of other banned words
         foreach ($banned_words_in_sentence as $key => $banned_words_array) {
             if ($key != 'blacklisted_words') {
                 usort($banned_words_array, function ($a, $b) {
@@ -371,22 +406,30 @@ class TextFilterService
         $banned_word_with_original_word = [];
         foreach ($banned_words_in_sentence as $key => $items) {
             foreach ($items as $word) {
-                $original_word = $this->findOriginalWord($words_of_refined_sentence, $word);
+                $original_words = $this->findOriginalWords($words_of_refined_sentence, $word);
 
-                if (preg_match('/^[a-zA-Z]+-[a-zA-Z]+$/', $original_word)) {
-                    $banned_word_with_original_word[$key][] = [
-                        'flagged_word' => $word,
-                        'sentence_token' => $original_word
-                    ];
-                } else {
-                    if ($this->countLettersBeforeAndAfterSubstring($original_word, $word) < 4) {
+                foreach ($original_words as $original_word) {
+                    if (preg_match('/^[a-zA-Z]+-[a-zA-Z]+$/', $original_word)) {
+                        //If word has hyphen (-)
                         $banned_word_with_original_word[$key][] = [
                             'flagged_word' => $word,
                             'sentence_token' => $original_word
                         ];
+                    } else {
+                        if ($this->isWordIdentifiable($original_word, $word) && !in_array($original_word, $words_found_in_redis)) {
+                            $banned_word_with_original_word[$key][] = [
+                                'flagged_word' => $word,
+                                'sentence_token' => $original_word
+                            ];
+                        }
                     }
                 }
             }
+        }
+
+        //Setting an empty blacklisted_words key if it is not available (to maintain API consistency)
+        if (!isset($banned_word_with_original_word['blacklisted_words'])) {
+            $banned_word_with_original_word['blacklisted_words'] = [];
         }
 
         return [
@@ -398,7 +441,6 @@ class TextFilterService
             'links' => $links_in_word,
             'grawlix' => $grawlix
         ];
-
     }
 
     private function checkIfAtLeastOneWordInDictionary(array $words): bool
@@ -432,32 +474,35 @@ class TextFilterService
     }
 
 
-    private function findOriginalWord($original_words_array, $word)
+    private function findOriginalWords($original_words_array, $word): array
     {
-        $original_word = "N/A";
+        $original_words = [];
 
         foreach ($original_words_array as $item) {
             foreach ($item['refined_words'] as $refined_word) {
                 if (strlen($word) < 3) {
+                    //if refined word has less than 3 characters, It should be an exact match
                     if ($refined_word == $word) {
-                        $original_word = $item['initial_word'];
-                        break 2;
+                        $original_words[] = $item['initial_word'];
+                        break;
                     }
                 } else {
+                    //If refined word has more than 3 characters it can be an exact match or a substring
                     if ($refined_word == $word) {
-                        $original_word = $item['initial_word'];
-                        break 2;
+                        $original_words[] = $item['initial_word'];
+                        break;
                     } else if (preg_match('/' . $word . '/i', $refined_word)) {
-                        $original_word = $item['initial_word'];
-                        break 2;
+                        $original_words[] = $item['initial_word'];
+                        break;
                     }
                 }
             }
         }
-        return $original_word;
+
+        return $original_words;
     }
 
-    function countLettersBeforeAndAfterSubstring($word, $substring): int
+    function isWordIdentifiable($word, $substring): bool
     {
         // Convert the word to lowercase and the substring to lowercase
         $word = strtolower($word);
@@ -466,9 +511,9 @@ class TextFilterService
         // Find the position of the substring within the word
         $position = strpos($word, $substring);
 
-        // If the substring is not found, return 0
+        // If the substring is not found, we return true (eg : original word is _a_sᅳ_s_ and the banned word caught is ass)
         if ($position === false) {
-            return 0;
+            return true;
         }
 
         // Extract the portion of the word before and after the substring
@@ -491,6 +536,6 @@ class TextFilterService
             }
         }
 
-        return $letterCountBefore + $letterCountAfter;
+        return ($letterCountBefore < 3 || $letterCountAfter < 3);
     }
 }
