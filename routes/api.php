@@ -21,7 +21,8 @@ Route::middleware([\App\Http\Middleware\TokenVerificationMiddleware::class])->gr
 
     //Main text filtration endpoint
     Route::prefix('v1')->group(function () {
-        Route::middleware([\App\Http\Middleware\RequestAuditMiddleware::class])->post('/text-filter', [\App\Http\Controllers\TextFiltrationController::class, 'textFilter']);
+        Route::middleware([\App\Http\Middleware\CheckIsUserActiveMiddleware::class])
+            ->post('/text-filter', [\App\Http\Controllers\TextFiltrationController::class, 'textFilter']);
     });
 });
 

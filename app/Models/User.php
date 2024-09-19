@@ -22,7 +22,9 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'free_request_count'
+        'free_request_count',
+        'is_active',
+        'user_inactivity_message'
     ];
 
     /**
