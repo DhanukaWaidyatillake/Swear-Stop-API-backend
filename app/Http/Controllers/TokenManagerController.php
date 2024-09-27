@@ -9,14 +9,14 @@ use App\Services\TokenManagerService;
 
 class TokenManagerController extends Controller
 {
-    public function generateToken(GenerateTokenRequest $request,TokenManagerService $tokenManagerService): \Illuminate\Foundation\Application|\Illuminate\Http\Response|\Illuminate\Contracts\Foundation\Application|\Illuminate\Contracts\Routing\ResponseFactory
+    public function generateToken(GenerateTokenRequest $request,TokenManagerService $tokenManagerService): \Illuminate\Http\JsonResponse
     {
         $user = User::query()->find($request->user_id);
 
         if ($user && $user->createToken($tokenManagerService)) {
-            return response('success', 200);
+            return response()->json('success', 200);
         } else {
-            return response('failed to create token', 500);
+            return response()->json('failed to create token', 500);
         }
     }
 

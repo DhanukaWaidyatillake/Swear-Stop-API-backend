@@ -14,11 +14,17 @@ server {
     #Once the request is forwarded to index.php from the previous block, the below block will come into action and activate FPM on index.php
     location ~ \.php$ {
         fastcgi_split_path_info ^(.+\.php)(/.+)$;
-        fastcgi_pass api-app:9000;
+        fastcgi_pass ${FPM_HOST};
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         include fastcgi_params;
         fastcgi_param PATH_INFO $fastcgi_path_info;
+
+        fastcgi_buffers 8 16k;
+        fastcgi_buffer_size 32k;
+        fastcgi_connect_timeout 300s;
+        fastcgi_send_timeout 60;
+        fastcgi_read_timeout 300;
     }
 }
 

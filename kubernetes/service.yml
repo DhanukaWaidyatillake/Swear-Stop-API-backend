@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # Name of the service, used for accessing and managing the service
+  name: swear-stop-api-service
+spec:
+  # Selector used to find the pods that this service should route traffic to
+  selector:
+    # Labels that match the pods created by the Deployment, ensuring the service is linked to the frontend pods
+    tier: backend
+    layer: api
+  ports:
+    - protocol: TCP  # Protocol used by the service (most services use TCP)
+      port: 80       # Port exposed by the service (this is the port external clients will use)
+      targetPort: 80 # The port on the container that the traffic will be routed to (inside the pod)
