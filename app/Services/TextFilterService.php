@@ -148,7 +148,6 @@ class TextFilterService
         $banned_words_in_sentence['blacklisted_words'][] = array_intersect($words, $black_listed_words);
         $banned_words_in_sentence['blacklisted_words'] = Arr::flatten($banned_words_in_sentence['blacklisted_words']);
 
-
         //Checking for grawlix
         foreach ($words as $key => $word) {
             if (preg_match($delimiter . '^(?=[^a-zA-Z]*[a-zA-Z][^a-zA-Z]*$)(?=.*[!@#$%^&*()_\-+=\{\}\[\]:;,.<>\/?|\|])' . $delimiter, $word) === 1) {
@@ -167,6 +166,7 @@ class TextFilterService
         }
 
         $words_of_refined_sentence = [];
+
         //Refining sentence
         foreach ($words as $word) {
 
@@ -242,7 +242,6 @@ class TextFilterService
                     } else if (in_array($refined_word, $black_listed_words)) {
                         //Checking for any black listed words (after refining)
                         $banned_words_in_sentence['blacklisted_words'][] = $refined_word;
-                        unset($refined_words[$key]);
                     }
                 } else {
                     unset($refined_words[$key]);
